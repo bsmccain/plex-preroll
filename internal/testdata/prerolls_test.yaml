@@ -1,0 +1,26 @@
+seasons:
+  - name: thanksgiving
+    from: "11-01"
+    to: "11-30"
+    files:
+      - turkeys.mp4
+      - mashed_potatoes.mp4
+
+  - name: christmas
+    from: "11-20"
+    to: "01-06"
+    files:
+      - jingle_bells.mp4
+      - santa_hat.mp4
+
+  - name: summer
+    from: "06-01"
+    to: "08-31"
+    files:
+      - beach_day.mp4
+      - ice_cream.mp4
+
+default:
+  - generic_intro.mp4
+  - plex_logo_spin.mp4
+
