@@ -24,18 +24,29 @@ func main() {
 		return
 	}
 
-	home, err := os.UserHomeDir()
-	paths := []string{".env", filepath.Join(home, ".config", "plex-preroll", ".env")}
-	loaded := false
-	for _, path := range paths {
-		if err := godotenv.Load(path); err == nil {
-			log.Printf("Loaded .env from %s", path)
-			loaded = true
-			break
+	// Determine potential .env paths
+	envPaths := []string{".env"}
+	userConfigDir, err := os.UserConfigDir()
+	if err == nil {
+		envPaths = append(envPaths, filepath.Join(userConfigDir, "plex-preroll", ".env"))
+	}
+	userHomeDir, err := os.UserHomeDir()
+	if err == nil {
+		envPaths = append(envPaths, filepath.Join(userHomeDir, ".config", "plex-preroll", ".env"))
+	}
+
+	loadedEnv := false
+	for _, path := range envPaths {
+		if _, err := os.Stat(path); err == nil {
+			if err := godotenv.Load(path); err == nil {
+				log.Printf("Loaded .env from %s", path)
+				loadedEnv = true
+				break
+			}
 		}
 	}
-	if !loaded {
-		log.Println("No .env file found in . or ~/.config/plex-preroll; relying on system env vars.")
+	if !loadedEnv {
+		log.Println("No .env file found in preferred locations; relying on system env vars if set.")
 	}
 
 	serverURL := os.Getenv("PLEX_SERVER_URL")
@@ -51,15 +62,29 @@ func main() {
 
 	cfgPath := os.Getenv("PLEX_PREROLL_CFG")
 	if cfgPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatalf("failed to get home directory: %v", err)
+		defaultCfgPaths := []string{}
+		if userConfigDir != "" {
+			defaultCfgPaths = append(defaultCfgPaths, filepath.Join(userConfigDir, "plex-preroll", "config.yaml"))
 		}
-		cfgPath = filepath.Join(homeDir, ".config", "plex-preroll", "config.yaml")
+		if userHomeDir != "" {
+			defaultCfgPaths = append(defaultCfgPaths, filepath.Join(userHomeDir, ".config", "plex-preroll", "config.yaml"))
+		}
+
+		for _, potentialPath := range defaultCfgPaths {
+			if _, err := os.Stat(potentialPath); err == nil {
+				cfgPath = potentialPath
+				log.Printf("Using config file: %s", cfgPath)
+				break
+			}
+		}
+		if cfgPath == "" {
+			log.Fatalf("No config file found in standard locations.")
+		}
 	}
+
 	cfg, err := internal.LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		log.Fatalf("Failed to load config from %s: %v", cfgPath, err)
 	}
 
 	today := time.Now()
@@ -67,9 +92,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to build preroll file list: %v", err)
 	}
-	log.Printf("Prerolls for %s:", today.Format("2006-01-02"))
+
+	log.Printf("Preroll list for %s:", today.Format("2006-01-02"))
 	for _, f := range prerolls {
-		log.Printf(" - %s", f)
+		log.Printf("  - %s", f)
 	}
 
 	if *dryRun {

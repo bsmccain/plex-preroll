@@ -4,40 +4,65 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 )
+
+var videoExtensions = map[string]bool{
+	".mp4":  true,
+	".mkv":  true,
+	".avi":  true,
+	".mov":  true,
+	".wmv":  true,
+	".ts":   true,
+	".m2ts": true,
+	".flv":  true,
+	".asf":  true,
+	".3gp":  true,
+}
+
+func isVideoFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return videoExtensions[ext]
+}
 
 func BuildPrerollFileList(paths []string) ([]string, error) {
 	files := []string{}
 
 	for _, path := range paths {
 		if !filepath.IsAbs(path) {
-			log.Printf("path %s is not absolute, skipping", path)
+			log.Printf("Path %q is not absolute. Skipping.", path)
 			continue
 		}
 
 		fi, err := os.Stat(path)
 		if err != nil {
-			log.Printf("failed to stat path %s: %v", path, err)
+			log.Printf("Failed to stat configured path %q. Skipping.", path)
 			continue
 		}
 
 		if fi.IsDir() {
 			dirFiles, err := os.ReadDir(path)
 			if err != nil {
-				log.Printf("failed to read directory %s: %v", path, err)
+				log.Printf("Failed to read directory %q. Skipping.", path)
 				continue
 			}
 			for _, dirFile := range dirFiles {
 				if !dirFile.IsDir() {
-					files = append(files, filepath.Join(path, dirFile.Name()))
+					fullPath := filepath.Join(path, dirFile.Name())
+					if isVideoFile(dirFile.Name()) {
+						files = append(files, fullPath)
+					}
 				}
 			}
 		} else {
-			files = append(files, path)
+			if isVideoFile(path) {
+				files = append(files, path)
+			} else {
+				log.Printf("Specified file %q is not a recognized video file. Skipping.", path)
+			}
 		}
 	}
-
-	sort.Strings(files)
-	return files, nil
+	slices.Sort(files)
+	return slices.Compact(files), nil
 }

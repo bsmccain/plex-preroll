@@ -88,13 +88,21 @@ Test data is organized in `internal/testdata/prerolls_test.yaml`.
 ## Configuration
 
 ### Environment Variables
-Loaded from `.env` file in the working directory:
+Loaded from a `.env` file. The search order is:
+1. Current working directory (`./.env`)
+2. Platform-specific user config dir (e.g., `~/.config/plex-preroll/.env` on Linux, `~/Library/Application Support/plex-preroll/.env` on macOS, `%APPDATA%\plex-preroll\.env` on Windows)
+3. Default path `~/.config/plex-preroll/.env`
+
+Contents:
 - `PLEX_SERVER_URL`: Plex server URL (default: `http://localhost:32400`)
 - `PLEX_TOKEN`: Required authentication token (no default)
-- `PLEX_PREROLL_CFG`: Override config file location
+- `PLEX_PREROLL_CFG`: Override config file location (optional)
 
 ### YAML Configuration
-Default location: `~/.config/plex-preroll/config.yaml`
+Path determined as follows:
+1. Value of `PLEX_PREROLL_CFG` environment variable, if set.
+2. Otherwise, searches in platform-specific user config dir (e.g., `~/.config/plex-preroll/config.yaml` on Linux).
+3. Then, default path `~/.config/plex-preroll/config.yaml`.
 
 Structure:
 ```yaml
@@ -111,7 +119,10 @@ default:
 
 Key behaviors:
 - Dates use MM-DD format with automatic zero-padding
-- Multiple seasons can be active simultaneously
-- Seasons can cross year boundaries
-- Only absolute paths are accepted
-- Directories are expanded to find video files
+- Multiple seasons can be active simultaneously (files are merged and deduplicated).
+- Seasons can cross year boundaries.
+- Only absolute paths are accepted for files and directories.
+- Directories are expanded to find video files:
+    - Only files with recognized video extensions (e.g., `.mp4`, `.mkv`, `.mov`, etc.) are included.
+    - Explicitly listed files are also checked against these extensions.
+- If a configured directory is unreadable, the application will error and exit.
