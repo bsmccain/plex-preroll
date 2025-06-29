@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ func main() {
 	if err != nil {
 		log.Printf("failed to load .env file: %v", err)
 	}
+
+	dryRun := flag.Bool("dry-run", false, "dry run")
+	flag.Parse()
 
 	serverURL := os.Getenv("PLEX_SERVER_URL")
 	if serverURL == "" {
@@ -33,7 +37,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to get home directory: %v", err)
 		}
-		cfgPath = filepath.Join(homeDir, ".plex-preroll", "config.yaml")
+		cfgPath = filepath.Join(homeDir, ".config", "plex-preroll", "config.yaml")
 	}
 	cfg, err := internal.LoadConfig(cfgPath)
 	if err != nil {
@@ -42,12 +46,17 @@ func main() {
 
 	today := time.Now()
 	prerolls := cfg.GetPrerolls(today)
-	log.Printf("Updating prerolls for %s: %v", today.Format("2006-01-02"), prerolls)
+	log.Printf("Prerolls for %s: %v", today.Format("2006-01-02"), prerolls)
+
+	if *dryRun {
+		log.Println("Dry run, skipping update")
+		return
+	}
+
 	err = internal.UpdatePreroll(serverURL, token, prerolls)
 	if err != nil {
 		log.Fatalf("failed to update preroll: %v", err)
 	}
 
 	log.Println("Preroll updated successfully")
-
 }
