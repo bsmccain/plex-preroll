@@ -41,7 +41,7 @@ The application looks for a `.env` file in the following locations, using the fi
     - Linux: `$XDG_CONFIG_HOME/plex-preroll/.env` or `~/.config/plex-preroll/.env`
     - macOS: `~/Library/Application Support/plex-preroll/.env`
     - Windows: `%APPDATA%\plex-preroll\.env`
-3. Legacy path: `~/.config/plex-preroll/.env` (if different from the platform-specific user config directory, primarily for backward compatibility).
+3. Default path: `~/.config/plex-preroll/.env` (if different from the platform-specific user config directory).
 
 Create a `.env` file in one of these locations with:
 
@@ -66,7 +66,7 @@ If the `PLEX_PREROLL_CFG` environment variable is set, it will use the path spec
     - Linux: `$XDG_CONFIG_HOME/plex-preroll/config.yaml` or `~/.config/plex-preroll/config.yaml`
     - macOS: `~/Library/Application Support/plex-preroll/config.yaml`
     - Windows: `%APPDATA%\plex-preroll\config.yaml`
-2. Legacy path: `~/.config/plex-preroll/config.yaml` (for backward compatibility).
+2. Default path: `~/.config/plex-preroll/config.yaml` (if different from the platform-specific user config directory).
 
 Example `config.yaml`:
 

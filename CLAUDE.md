@@ -91,7 +91,7 @@ Test data is organized in `internal/testdata/prerolls_test.yaml`.
 Loaded from a `.env` file. The search order is:
 1. Current working directory (`./.env`)
 2. Platform-specific user config dir (e.g., `~/.config/plex-preroll/.env` on Linux, `~/Library/Application Support/plex-preroll/.env` on macOS, `%APPDATA%\plex-preroll\.env` on Windows)
-3. Legacy path `~/.config/plex-preroll/.env`
+3. Default path `~/.config/plex-preroll/.env`
 
 Contents:
 - `PLEX_SERVER_URL`: Plex server URL (default: `http://localhost:32400`)
@@ -102,7 +102,7 @@ Contents:
 Path determined as follows:
 1. Value of `PLEX_PREROLL_CFG` environment variable, if set.
 2. Otherwise, searches in platform-specific user config dir (e.g., `~/.config/plex-preroll/config.yaml` on Linux).
-3. Then, legacy path `~/.config/plex-preroll/config.yaml`.
+3. Then, default path `~/.config/plex-preroll/config.yaml`.
 
 Structure:
 ```yaml
