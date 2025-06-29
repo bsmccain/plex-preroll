@@ -17,8 +17,9 @@ seasons:
     from: "06-01"
     to: "08-31"
     files:
-      - beach_day.mp4
-      - ice_cream.mp4
+      - /theater/Media/Preroll/general/1.mp4
+      - /theater/Media/Preroll/general/6.mp4
+      - /theater/Media/Preroll/general/4.mp4
 
 default:
   - generic_intro.mp4
