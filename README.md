@@ -35,11 +35,15 @@ Download the latest release from the releases page.
 
 ### Environment Variables
 
-The application looks for a `.env` file in these locations (in order):
-1. Current working directory
-2. `~/.config/plex-preroll/.env` (recommended for automated runs)
+The application looks for a `.env` file in the following locations, using the first one it finds:
+1. Current working directory (`./.env`). This is useful for project-specific overrides.
+2. Platform-specific user configuration directory:
+    - Linux: `$XDG_CONFIG_HOME/plex-preroll/.env` or `~/.config/plex-preroll/.env`
+    - macOS: `~/Library/Application Support/plex-preroll/.env`
+    - Windows: `%APPDATA%\plex-preroll\.env`
+3. Legacy path: `~/.config/plex-preroll/.env` (if different from the platform-specific user config directory, primarily for backward compatibility).
 
-Create a `.env` file with:
+Create a `.env` file in one of these locations with:
 
 ```bash
 # Required
@@ -52,11 +56,19 @@ PLEX_PREROLL_CFG=~/.config/plex-preroll/config.yaml
 
 To get your Plex token, see the [Plex support article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 
-**Tip**: For cron jobs, place the `.env` file at `~/.config/plex-preroll/.env` so the application can find it automatically without needing to set environment variables in your crontab.
+**Tip**: For automated runs (like cron jobs), placing the `.env` file in your user configuration directory (e.g., `~/.config/plex-preroll/.env` on Linux) is recommended.
 
 ### Preroll Configuration
 
-Create a configuration file at `~/.config/plex-preroll/config.yaml` (or specify a custom location with `PLEX_PREROLL_CFG`):
+The application loads its preroll definitions from a YAML configuration file.
+If the `PLEX_PREROLL_CFG` environment variable is set, it will use the path specified. Otherwise, it looks for `config.yaml` in the following locations, using the first one it finds:
+1. Platform-specific user configuration directory (inside a `plex-preroll` subdirectory, same as `.env` file):
+    - Linux: `$XDG_CONFIG_HOME/plex-preroll/config.yaml` or `~/.config/plex-preroll/config.yaml`
+    - macOS: `~/Library/Application Support/plex-preroll/config.yaml`
+    - Windows: `%APPDATA%\plex-preroll\config.yaml`
+2. Legacy path: `~/.config/plex-preroll/config.yaml` (for backward compatibility).
+
+Example `config.yaml`:
 
 ```yaml
 seasons:
@@ -102,8 +114,9 @@ default:
 Notes:
 - Seasons can overlap (all matching seasons will be included)
 - Seasons can cross year boundaries (e.g., Christmas from Nov 20 to Jan 6)
-- All file paths must be absolute paths
-- Directories in the files list will be expanded to include all video files
+- All file paths must be absolute paths.
+- Directories in the `files` list will be expanded. Only files with recognized video extensions (e.g., `.mp4`, `.mkv`, `.mov`, `.avi`, `.ts`, `.webm`, etc.) will be included from these directories. Explicitly listed files are also checked against these extensions.
+- If a configured directory cannot be read (e.g., due to permissions), the application will log an error and exit.
 
 ## Usage
 
@@ -214,11 +227,15 @@ go test ./internal -run TestGetActivePrerolls
    - Ensure your Plex token has the necessary permissions
    - Check that Plex server is running and accessible
 
-3. **"No video files found in directory"**
-   - Ensure the directory exists and contains video files
-   - Check file permissions
+3. **"No video files found in directory" or "Specified file ... is not a recognized video file"**
+   - Ensure the directory exists and contains files with common video extensions (e.g., `.mp4`, `.mkv`).
+   - Check that explicitly listed files also have recognized video extensions.
+   - Verify file and directory permissions.
 
-4. **Prerolls not showing in Plex**
+4. **"Failed to read configured directory..."**
+   - This indicates a permission issue or other problem accessing a directory listed in your `config.yaml`. Ensure the application has rights to list files in that directory.
+
+5. **Prerolls not showing in Plex**
    - Verify the video files are accessible to the Plex server
    - Check Plex server logs for any errors
    - Ensure preroll feature is enabled in Plex settings
