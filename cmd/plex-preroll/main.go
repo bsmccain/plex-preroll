@@ -12,9 +12,18 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Printf("failed to load .env file: %v", err)
+	home, err := os.UserHomeDir()
+	paths := []string{".env", filepath.Join(home, ".config", "plex-preroll", ".env")}
+	loaded := false
+	for _, path := range paths {
+		if err := godotenv.Load(path); err == nil {
+			log.Printf("Loaded .env from %s", path)
+			loaded = true
+			break
+		}
+	}
+	if !loaded {
+		log.Println("No .env file found in . or ~/.config/plex-preroll; relying on system env vars.")
 	}
 
 	dryRun := flag.Bool("dry-run", false, "dry run")
@@ -45,7 +54,10 @@ func main() {
 	}
 
 	today := time.Now()
-	prerolls := cfg.GetPrerolls(today)
+	prerolls, err := internal.BuildPrerollFileList(cfg.GetPrerolls(today))
+	if err != nil {
+		log.Fatalf("failed to build preroll file list: %v", err)
+	}
 	log.Printf("Prerolls for %s: %v", today.Format("2006-01-02"), prerolls)
 
 	if *dryRun {
