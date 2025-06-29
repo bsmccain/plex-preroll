@@ -58,7 +58,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to build preroll file list: %v", err)
 	}
-	log.Printf("Prerolls for %s: %v", today.Format("2006-01-02"), prerolls)
+	log.Printf("Prerolls for %s:", today.Format("2006-01-02"))
+	for _, f := range prerolls {
+		log.Printf(" - %s", f)
+	}
 
 	if *dryRun {
 		log.Println("Dry run, skipping update")
