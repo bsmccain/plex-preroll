@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,7 +12,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var version = "dev"
+
 func main() {
+	dryRun := flag.Bool("dry-run", false, "dry run")
+	showVersion := flag.Bool("version", false, "print version")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("plex-preroll %s\n", version)
+		return
+	}
+
 	home, err := os.UserHomeDir()
 	paths := []string{".env", filepath.Join(home, ".config", "plex-preroll", ".env")}
 	loaded := false
@@ -25,9 +37,6 @@ func main() {
 	if !loaded {
 		log.Println("No .env file found in . or ~/.config/plex-preroll; relying on system env vars.")
 	}
-
-	dryRun := flag.Bool("dry-run", false, "dry run")
-	flag.Parse()
 
 	serverURL := os.Getenv("PLEX_SERVER_URL")
 	if serverURL == "" {
