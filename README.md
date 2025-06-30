@@ -33,7 +33,26 @@ Download the latest release from the releases page.
 
 ## Configuration
 
-### Environment Variables
+### Configuration Setup Tool (Recommended for new users)
+
+For an easy, guided setup of your `.env` and `config.yaml` files, you can use the `plex-preroll-setup` tool.
+
+First, build the setup tool (if you haven't already built all tools with `make all` or `make build-setup`):
+```bash
+make build-setup
+```
+
+Then run the interactive setup:
+```bash
+./bin/plex-preroll-setup
+```
+This will walk you through creating both the `.env` file (for Plex connection details) and the `config.yaml` file (for defining your preroll seasons and files). It will suggest default save locations for these files based on your operating system.
+
+### Manual Configuration
+
+If you prefer to set up the files manually:
+
+#### Environment Variables
 
 The application looks for a `.env` file in the following locations, using the first one it finds:
 1. Current working directory (`./.env`). This is useful for project-specific overrides.
@@ -178,12 +197,22 @@ When run on December 25th with the example configuration:
 
 ### Building
 
+To build the main `plex-preroll` application:
 ```bash
 # Build with version info
 make build
+# or simply: go build -o bin/plex-preroll ./cmd/plex-preroll
+```
 
-# Build without make
-go build -o bin/plex-preroll ./cmd/plex-preroll
+To build the `plex-preroll-setup` tool:
+```bash
+make build-setup
+# or simply: go build -o bin/plex-preroll-setup ./cmd/plex-preroll-setup
+```
+
+To build both:
+```bash
+make all
 ```
 
 ### Running Tests
@@ -202,17 +231,19 @@ go test ./internal -run TestGetActivePrerolls
 ### Project Structure
 
 ```
-├── cmd/plex-preroll/     # Application entry point
-├── internal/             # Core business logic
-│   ├── config.go         # Configuration and preroll selection
-│   ├── config_test.go    # Configuration tests
-│   ├── files.go          # File system operations
-│   ├── files_test.go     # File system tests
-│   ├── plexclient.go     # Plex API client
-│   └── testdata/         # Test fixtures
-├── .env.example          # Example environment configuration
-├── Makefile              # Build automation
-└── bin/                  # Compiled binaries
+├── cmd/
+│   ├── plex-preroll/        # Main application entry point
+│   └── plex-preroll-setup/  # Configuration setup tool entry point
+├── internal/                # Core business logic (shared)
+│   ├── config.go            # Configuration loading and preroll selection
+│   ├── config_test.go       # Configuration tests
+│   ├── files.go             # File system operations
+│   ├── files_test.go        # File system tests
+│   ├── plexclient.go        # Plex API client
+│   └── testdata/            # Test fixtures
+├── .env.example             # Example environment configuration
+├── Makefile                 # Build automation
+└── bin/                     # Compiled binaries (plex-preroll, plex-preroll-setup)
 ```
 
 ## Troubleshooting
