@@ -1,20 +1,24 @@
 package internal
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestUpdatePreroll(t *testing.T) {
 	tests := []struct {
-		name           string
-		videos         []string
-		serverStatus   int
-		expectError    bool
-		expectedQuery  string
-		expectedToken  string
+		name          string
+		videos        []string
+		serverStatus  int
+		expectError   bool
+		expectedQuery string
+		expectedToken string
 	}{
 		{
 			name:          "single video",
@@ -176,5 +180,63 @@ func TestUpdatePrerollSpecialCharactersInPath(t *testing.T) {
 	expected := strings.Join(videos, ";")
 	if receivedQuery != expected {
 		t.Errorf("expected query %q, got %q", expected, receivedQuery)
+	}
+}
+
+func TestUpdatePrerollRejectsNonHTTPURLs(t *testing.T) {
+	for _, serverURL := range []string{
+		"", "localhost:32400", "/plex", "ftp://localhost", "http:///plex", "http://:32400",
+		"http://user:password@localhost", "http://localhost/#fragment",
+	} {
+		t.Run(serverURL, func(t *testing.T) {
+			if err := UpdatePreroll(serverURL, "token", nil); err == nil {
+				t.Fatal("expected invalid URL to fail")
+			}
+		})
+	}
+}
+
+func TestUpdatePrerollRejectsRedirects(t *testing.T) {
+	for _, status := range []int{
+		http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var targetRequests atomic.Int32
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				targetRequests.Add(1)
+				if r.Header.Get("X-Plex-Token") != "" {
+					t.Error("Plex token reached the redirect target")
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, target.URL, status)
+			}))
+			defer source.Close()
+
+			if err := UpdatePreroll(source.URL, "secret-token", []string{"/video.mp4"}); err == nil {
+				t.Fatal("expected redirect to fail")
+			}
+			if got := targetRequests.Load(); got != 0 {
+				t.Fatalf("redirect target received %d requests, want zero", got)
+			}
+		})
+	}
+}
+
+func TestUpdatePrerollTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	// Exercise the same request path with a short deadline to avoid waiting for
+	// the production 30-second timeout during every test run.
+	err := updatePreroll(server.URL, "token", nil, 25*time.Millisecond)
+	var networkError net.Error
+	if !errors.As(err, &networkError) || !networkError.Timeout() {
+		t.Fatalf("expected request timeout, got %v", err)
 	}
 }

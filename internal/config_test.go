@@ -109,6 +109,11 @@ func TestNormalizeMMDD(t *testing.T) {
 			expected:    "12-31",
 			expectError: false,
 		},
+		{name: "leap day", input: "2-29", expected: "02-29"},
+		{name: "February 30", input: "02-30", expectError: true},
+		{name: "February 31", input: "02-31", expectError: true},
+		{name: "April 31", input: "04-31", expectError: true},
+		{name: "June 31", input: "06-31", expectError: true},
 		{
 			name:        "invalid month 13",
 			input:       "13-01",
@@ -173,7 +178,7 @@ func TestNormalizeMMDD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := normalizeMMDD(tt.input)
+			result, err := NormalizeMMDD(tt.input)
 
 			if tt.expectError {
 				if err == nil {
@@ -509,5 +514,109 @@ func TestGetPrerollsSortedOutput(t *testing.T) {
 	expected := []string{"a.mp4", "m.mp4", "z.mp4"}
 	if !reflect.DeepEqual(prerolls, expected) {
 		t.Errorf("expected sorted output %v, got %v", expected, prerolls)
+	}
+}
+
+func TestGetPrerollsSingleDay(t *testing.T) {
+	cfg := &Config{
+		Seasons: []Season{{Name: "Christmas", From: "12-25", To: "12-25", Files: []string{"christmas.mp4"}}},
+		Default: []string{"default.mp4"},
+	}
+	for _, date := range []string{"2025-07-04", "2025-12-24", "2025-12-25", "2025-12-26"} {
+		t.Run(date, func(t *testing.T) {
+			today, err := time.Parse("2006-01-02", date)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"default.mp4"}
+			if date == "2025-12-25" {
+				want = []string{"christmas.mp4"}
+			}
+			if got := cfg.GetPrerolls(today); !reflect.DeepEqual(got, want) {
+				t.Fatalf("GetPrerolls(%s) = %v, want %v", date, got, want)
+			}
+		})
+	}
+}
+
+func TestGetPrerollsLeapDay(t *testing.T) {
+	cfg := &Config{
+		Seasons: []Season{{Name: "Leap day", From: "02-29", To: "02-29", Files: []string{"leap.mp4"}}},
+		Default: []string{"default.mp4"},
+	}
+	for _, date := range []string{"2024-02-29", "2025-02-28", "2025-03-01"} {
+		t.Run(date, func(t *testing.T) {
+			today, err := time.Parse("2006-01-02", date)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"default.mp4"}
+			if date == "2024-02-29" {
+				want = []string{"leap.mp4"}
+			}
+			if got := cfg.GetPrerolls(today); !reflect.DeepEqual(got, want) {
+				t.Fatalf("GetPrerolls(%s) = %v, want %v", date, got, want)
+			}
+		})
+	}
+}
+
+func TestGetPrerollsDoesNotModifyDefault(t *testing.T) {
+	cfg := &Config{Default: []string{"z.mp4", "a.mp4"}}
+	got := cfg.GetPrerolls(time.Now())
+	got[0] = "changed.mp4"
+	if !reflect.DeepEqual(cfg.Default, []string{"z.mp4", "a.mp4"}) {
+		t.Fatalf("GetPrerolls modified the configured defaults: %v", cfg.Default)
+	}
+}
+
+func TestLoadConfigRejectsAmbiguousDocuments(t *testing.T) {
+	for _, content := range []string{
+		"null\n", "{}\n", "default: null\n", "defaults: []\n",
+		"default: []\n---\ndefault: []\n", "default: []\n---\n",
+		"default: []\n---\ninvalid: [\n",
+		"seasons:\n  - name: holiday\n    from: 12-25\n    to: 12-25\n    file: /video.mp4\n",
+		"seasons:\n  - name: holiday\n    from: 02-31\n    to: 03-01\n    files: []\n",
+		"seasons:\n  - name: holiday\n    from: 12-25\n    to: 12-25\n",
+		"seasons:\n  - name: holiday\n    from: 12-25\n    to: 12-25\n    files: null\n",
+	} {
+		t.Run(content, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadConfig(path); err == nil {
+				t.Fatal("expected invalid config to fail")
+			}
+		})
+	}
+}
+
+func TestLoadConfigAllowsExplicitEmptyDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("default: []\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.GetPrerolls(time.Now()); len(got) != 0 {
+		t.Fatalf("expected empty config to clear prerolls, got %v", got)
+	}
+}
+
+func TestGetPrerollsEmptySeasonOverridesDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "seasons:\n  - name: No prerolls\n    from: 12-25\n    to: 12-25\n    files: []\ndefault: [default.mp4]\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.GetPrerolls(time.Date(2026, time.December, 25, 0, 0, 0, 0, time.UTC)); len(got) != 0 {
+		t.Fatalf("expected matching empty season to clear prerolls, got %v", got)
 	}
 }

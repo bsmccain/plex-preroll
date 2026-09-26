@@ -1,220 +1,252 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/bsmccain/plex-preroll/internal"
+	"gopkg.in/yaml.v3"
 )
 
-func TestIntegrationDryRun(t *testing.T) {
-	// Create a temporary config file
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	videoDir := filepath.Join(tempDir, "videos")
-	os.Mkdir(videoDir, 0755)
-
-	// Create a video file
-	videoFile := filepath.Join(videoDir, "test.mp4")
-	os.WriteFile(videoFile, []byte("fake video"), 0644)
-
-	// Write config
-	configContent := `seasons:
-  - name: all_year
-    from: "01-01"
-    to: "12-31"
-    files:
-      - ` + videoFile + `
-default:
-  - ` + videoFile
-	os.WriteFile(configPath, []byte(configContent), 0644)
-
-	// Set up environment
-	originalCfg := os.Getenv("PLEX_PREROLL_CFG")
-	originalToken := os.Getenv("PLEX_TOKEN")
-	originalURL := os.Getenv("PLEX_SERVER_URL")
-	defer func() {
-		os.Setenv("PLEX_PREROLL_CFG", originalCfg)
-		os.Setenv("PLEX_TOKEN", originalToken)
-		os.Setenv("PLEX_SERVER_URL", originalURL)
-	}()
-
-	os.Setenv("PLEX_PREROLL_CFG", configPath)
-	os.Setenv("PLEX_TOKEN", "test-token")
-	os.Setenv("PLEX_SERVER_URL", "http://localhost:32400")
-
-	// Note: We can't easily test main() directly since it uses log.Fatalf
-	// and flag parsing. This test validates the config loading works.
-	// Full integration testing would require running the binary as a subprocess.
+func isolate(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, key := range []string{"PLEX_TOKEN", "PLEX_SERVER_URL", "PLEX_PREROLL_CFG"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("APPDATA", filepath.Join(dir, "appdata"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+	return dir
 }
 
-func TestPlexServerIntegration(t *testing.T) {
-	// Create a mock Plex server
-	var receivedPath string
-	var receivedQuery string
-	var receivedToken string
-	var receivedMethod string
+func writeConfig(t *testing.T, path string, files []string) {
+	t.Helper()
+	data, err := yaml.Marshal(internal.Config{Default: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
 
+func TestRunUpdatesPlexAndDryRun(t *testing.T) {
+	dir := isolate(t)
+	video := filepath.Join(dir, "intro.mp4")
+	if err := os.WriteFile(video, []byte("test video"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.yaml")
+	writeConfig(t, cfg, []string{video})
+	t.Setenv("PLEX_TOKEN", "test-token")
+	t.Setenv("PLEX_PREROLL_CFG", cfg)
+	type request struct{ method, path, token, files string }
+	requests := make(chan request, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedMethod = r.Method
-		receivedPath = r.URL.Path
-		receivedQuery = r.URL.Query().Get("CinemaTrailersPrerollID")
-		receivedToken = r.Header.Get("X-Plex-Token")
+		requests <- request{r.Method, r.URL.Path, r.Header.Get("X-Plex-Token"), r.URL.Query().Get("CinemaTrailersPrerollID")}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-
-	// Create test files
-	tempDir := t.TempDir()
-	videoFile := filepath.Join(tempDir, "test.mp4")
-	os.WriteFile(videoFile, []byte("fake video"), 0644)
-
-	configPath := filepath.Join(tempDir, "config.yaml")
-	configContent := `seasons:
-  - name: all_year
-    from: "01-01"
-    to: "12-31"
-    files:
-      - ` + videoFile + `
-default:
-  - ` + videoFile
-	os.WriteFile(configPath, []byte(configContent), 0644)
-
-	// Import and use the internal package directly for testing
-	// This tests the UpdatePreroll function in an integration context
-	// (The actual binary testing would require subprocess execution)
-
-	// Verify mock server is working
-	if server.URL == "" {
-		t.Fatal("mock server URL is empty")
+	t.Setenv("PLEX_SERVER_URL", server.URL)
+	var output bytes.Buffer
+	if err := run([]string{"--dry-run"}, &output, &output); err != nil {
+		t.Fatal(err)
 	}
+	if !strings.Contains(output.String(), video) {
+		t.Fatalf("missing video in dry run: %s", &output)
+	}
+	select {
+	case r := <-requests:
+		t.Fatalf("dry run made request: %+v", r)
+	default:
+	}
+	if err := run(nil, &output, &output); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-requests:
+		want := request{"PUT", "/:/prefs", "test-token", video}
+		if got != want {
+			t.Fatalf("request = %+v, want %+v", got, want)
+		}
+	default:
+		t.Fatal("no update sent")
+	}
+}
 
-	// Make a test request to verify server setup
-	req, _ := http.NewRequest("PUT", server.URL+"/:/prefs?CinemaTrailersPrerollID=test", nil)
-	req.Header.Set("X-Plex-Token", "test-token")
-	client := &http.Client{}
-	resp, err := client.Do(req)
+func TestRunPreservesSettingsOnMissingFiles(t *testing.T) {
+	dir := isolate(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1) }))
+	defer server.Close()
+	t.Setenv("PLEX_TOKEN", "test-token")
+	t.Setenv("PLEX_SERVER_URL", server.URL)
+	cfg := filepath.Join(dir, "config.yaml")
+	t.Setenv("PLEX_PREROLL_CFG", cfg)
+	writeConfig(t, cfg, []string{filepath.Join(dir, "missing.mp4")})
+	var output bytes.Buffer
+	if err := run(nil, &output, &output); err == nil {
+		t.Fatal("missing file must fail")
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("sent %d requests on file error", got)
+	}
+	writeConfig(t, cfg, []string{})
+	if err := run(nil, &output, &output); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("explicit empty config sent %d requests, want 1", got)
+	}
+}
+
+func TestRunEnvironmentSearchAndTilde(t *testing.T) {
+	dir := isolate(t)
+	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
-		t.Fatalf("failed to make test request: %v", err)
+		t.Fatal(err)
 	}
-	resp.Body.Close()
-
-	if receivedMethod != "PUT" {
-		t.Errorf("expected PUT method, got %s", receivedMethod)
+	userEnvDir := filepath.Join(userConfigDir, "plex-preroll")
+	if err := os.MkdirAll(userEnvDir, 0700); err != nil {
+		t.Fatal(err)
 	}
-	if receivedPath != "/:/prefs" {
-		t.Errorf("expected /:/prefs path, got %s", receivedPath)
+	config := filepath.Join(dir, "prerolls.yaml")
+	writeConfig(t, config, []string{})
+	// The current-directory file wins over the invalid user configuration file.
+	if err := os.WriteFile(filepath.Join(userEnvDir, ".env"), []byte("INVALID LINE !\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if receivedQuery != "test" {
-		t.Errorf("expected 'test' query, got %s", receivedQuery)
+	if err := os.WriteFile(".env", []byte("PLEX_TOKEN=test-token\nPLEX_PREROLL_CFG=~/prerolls.yaml\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if receivedToken != "test-token" {
-		t.Errorf("expected 'test-token', got %s", receivedToken)
+	var output bytes.Buffer
+	if err := run([]string{"--dry-run"}, &output, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Loaded .env from .env") {
+		t.Fatalf("wrong dotenv search order: %s", &output)
+	}
+	if err := os.Remove(".env"); err != nil {
+		t.Fatal(err)
+	}
+	// An existing malformed file must report an error, even with inherited env values.
+	if err := run([]string{"--dry-run"}, &output, &output); err == nil || !strings.Contains(err.Error(), "load .env") {
+		t.Fatalf("malformed dotenv error = %v", err)
 	}
 }
 
-func TestEnvPathSearch(t *testing.T) {
-	// Test that env path search order is correct
-	tempDir := t.TempDir()
-
-	// Create a .env file in the temp directory
-	envFile := filepath.Join(tempDir, ".env")
-	envContent := "PLEX_TOKEN=test-token-from-env\nPLEX_SERVER_URL=http://test-server:32400"
-	os.WriteFile(envFile, []byte(envContent), 0644)
-
-	// Verify file was created
-	if _, err := os.Stat(envFile); os.IsNotExist(err) {
-		t.Fatal("failed to create test .env file")
-	}
-
-	// Read and verify content
-	content, err := os.ReadFile(envFile)
+func TestRunDefaultConfigSearch(t *testing.T) {
+	isolate(t)
+	dir, err := os.UserConfigDir()
 	if err != nil {
-		t.Fatalf("failed to read .env file: %v", err)
+		t.Fatal(err)
 	}
-
-	if !strings.Contains(string(content), "PLEX_TOKEN=test-token-from-env") {
-		t.Error("env file doesn't contain expected PLEX_TOKEN")
+	writeConfig(t, filepath.Join(dir, "plex-preroll", "config.yaml"), []string{})
+	t.Setenv("PLEX_TOKEN", "test-token")
+	var output bytes.Buffer
+	if err := run([]string{"--dry-run"}, &output, &output); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestConfigPathSearch(t *testing.T) {
-	// Test that config path search works
-	tempDir := t.TempDir()
-
-	// Create a config file
-	configPath := filepath.Join(tempDir, "config.yaml")
-	configContent := `seasons:
-  - name: test
-    from: "01-01"
-    to: "12-31"
-    files:
-      - /path/to/video.mp4
-default:
-  - /path/to/default.mp4`
-	os.WriteFile(configPath, []byte(configContent), 0644)
-
-	// Verify file exists and is readable
-	info, err := os.Stat(configPath)
-	if err != nil {
-		t.Fatalf("config file not accessible: %v", err)
-	}
-
-	if info.Size() == 0 {
-		t.Error("config file is empty")
+	if !strings.Contains(output.String(), "Using config file:") {
+		t.Fatalf("default config not selected: %s", &output)
 	}
 }
 
-func TestVersionString(t *testing.T) {
-	// Verify the version variable exists and has a default
-	if version == "" {
-		t.Error("version should not be empty")
+func TestRunValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		token string
+		want  string
+	}{
+		{"missing token", nil, "", "PLEX_TOKEN"},
+		{"missing config", nil, "test-token", "no config file"},
+		{"unknown option", []string{"--unknown"}, "", "flag provided but not defined"},
+		{"unexpected argument", []string{"extra"}, "", "unexpected arguments"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			if tc.token != "" {
+				t.Setenv("PLEX_TOKEN", tc.token)
+			}
+			var output bytes.Buffer
+			err := run(tc.args, &output, &output)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
 	}
-
-	// Default version should be "dev" if not set during build
-	if version != "dev" {
-		t.Logf("version is set to: %s (may be set during build)", version)
+	for _, arg := range []string{"--version", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			isolate(t)
+			var output bytes.Buffer
+			if err := run([]string{arg}, &output, &output); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), "plex-preroll") {
+				t.Fatalf("unexpected output: %s", &output)
+			}
+		})
 	}
 }
 
-func TestDefaultServerURL(t *testing.T) {
-	// Test that the default server URL logic works correctly
-	originalURL := os.Getenv("PLEX_SERVER_URL")
-	defer os.Setenv("PLEX_SERVER_URL", originalURL)
-
-	// Clear the environment variable
-	os.Unsetenv("PLEX_SERVER_URL")
-
-	serverURL := os.Getenv("PLEX_SERVER_URL")
-	if serverURL != "" {
-		t.Error("PLEX_SERVER_URL should be empty after unset")
+func TestCommandSubprocess(t *testing.T) {
+	// Build the real command once, then verify its process exit status and flags.
+	binary := filepath.Join(t.TempDir(), "plex-preroll")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
 	}
-
-	// The default in main.go is http://localhost:32400
-	expectedDefault := "http://localhost:32400"
-	if serverURL == "" {
-		serverURL = expectedDefault
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, output)
 	}
-
-	if serverURL != expectedDefault {
-		t.Errorf("expected default URL %s, got %s", expectedDefault, serverURL)
+	dir := isolate(t)
+	writeConfig(t, filepath.Join(dir, "config.yaml"), []string{})
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		token string
+		fail  bool
+		want  string
+	}{
+		{"version", []string{"--version"}, "", false, "plex-preroll dev"},
+		{"missing token", nil, "", true, "PLEX_TOKEN"},
+		{"dry run", []string{"--dry-run"}, "test-token", false, "Dry run, skipping update"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, binary, tc.args...)
+			cmd.Env = append(os.Environ(), "PLEX_TOKEN="+tc.token, "PLEX_PREROLL_CFG="+filepath.Join(dir, "config.yaml"))
+			output, err := cmd.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatal(ctx.Err())
+			}
+			if (err != nil) != tc.fail {
+				t.Fatalf("exit: %v\n%s", err, output)
+			}
+			if !strings.Contains(string(output), tc.want) {
+				t.Fatalf("output %q missing %q", output, tc.want)
+			}
+		})
 	}
-}
-
-func TestRequiredPlexToken(t *testing.T) {
-	// Test that PLEX_TOKEN is required
-	originalToken := os.Getenv("PLEX_TOKEN")
-	defer os.Setenv("PLEX_TOKEN", originalToken)
-
-	os.Unsetenv("PLEX_TOKEN")
-
-	token := os.Getenv("PLEX_TOKEN")
-	if token != "" {
-		t.Error("PLEX_TOKEN should be empty after unset")
-	}
-
-	// The main function would call log.Fatalf if token is empty
-	// We can't test that directly without running as subprocess
 }
