@@ -26,8 +26,14 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Local credentials and configuration
 .env
+.env.*
+!.env.example
+/config.yaml
+/config.yml
+/prerolls.yaml
+/prerolls.yml
 
 # Editor/IDE
 # .idea/

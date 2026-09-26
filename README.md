@@ -1,280 +1,167 @@
 # plex-preroll
 
-A Go application for managing seasonal preroll videos in Plex Media Server. Automatically selects which preroll videos should be active based on the current date and updates your Plex server's preroll settings.
+Set Plex Media Server's preroll videos by season. Run the command manually or on a schedule; it selects videos for today's date and updates your server's Movie pre-roll video setting.
 
-## Features
+All matching seasons contribute videos. If no season matches, the command uses the default list. It sends a semicolon-separated list, so Plex chooses one video at random for each playback. See [Plex's preroll documentation](https://support.plex.tv/articles/202920803-extras/) for playback requirements.
 
-- Automatically updates Plex server preroll settings based on date
-- Define custom seasons with date ranges (e.g., Halloween, Christmas, Summer)
-- Support for overlapping seasons
-- Handles seasons that cross year boundaries
-- Falls back to default prerolls when no season matches
-- Directory expansion - specify a directory and all video files will be included
-- Dry-run mode for testing without updating Plex
-- Simple YAML configuration
+## Install from source
 
-## Installation
-
-### From Source
-
-Requires Go 1.20 or later:
+You need Go 1.26.0 or later. Use a current Go release for its security fixes.
 
 ```bash
-git clone https://github.com/yourusername/plex-preroll.git
+git clone https://github.com/bsmccain/plex-preroll.git
 cd plex-preroll
-make build
-```
-
-This will create a binary at `bin/plex-preroll` with version information included.
-
-### Pre-built Binary
-
-Download the latest release from the releases page.
-
-## Configuration
-
-### Configuration Setup Tool (Recommended for new users)
-
-For an easy, guided setup of your `.env` and `config.yaml` files, you can use the `plex-preroll-setup` tool.
-
-First, build the setup tool (if you haven't already built all tools with `make all` or `make build-setup`):
-```bash
-make build-setup
-```
-
-Then run the interactive setup:
-```bash
-./bin/plex-preroll-setup
-```
-This will walk you through creating both the `.env` file (for Plex connection details) and the `config.yaml` file (for defining your preroll seasons and files). It will suggest default save locations for these files based on your operating system.
-
-### Manual Configuration
-
-If you prefer to set up the files manually:
-
-#### Environment Variables
-
-The application looks for a `.env` file in the following locations, using the first one it finds:
-1. Current working directory (`./.env`). This is useful for project-specific overrides.
-2. Platform-specific user configuration directory:
-    - Linux: `$XDG_CONFIG_HOME/plex-preroll/.env` or `~/.config/plex-preroll/.env`
-    - macOS: `~/Library/Application Support/plex-preroll/.env`
-    - Windows: `%APPDATA%\plex-preroll\.env`
-3. Default path: `~/.config/plex-preroll/.env` (if different from the platform-specific user config directory).
-
-Create a `.env` file in one of these locations with:
-
-```bash
-# Required
-PLEX_TOKEN=your-plex-token-here
-
-# Optional (defaults shown)
-PLEX_SERVER_URL=http://localhost:32400
-PLEX_PREROLL_CFG=~/.config/plex-preroll/config.yaml
-```
-
-To get your Plex token, see the [Plex support article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
-
-**Tip**: For automated runs (like cron jobs), placing the `.env` file in your user configuration directory (e.g., `~/.config/plex-preroll/.env` on Linux) is recommended.
-
-### Preroll Configuration
-
-The application loads its preroll definitions from a YAML configuration file.
-If the `PLEX_PREROLL_CFG` environment variable is set, it will use the path specified. Otherwise, it looks for `config.yaml` in the following locations, using the first one it finds:
-1. Platform-specific user configuration directory (inside a `plex-preroll` subdirectory, same as `.env` file):
-    - Linux: `$XDG_CONFIG_HOME/plex-preroll/config.yaml` or `~/.config/plex-preroll/config.yaml`
-    - macOS: `~/Library/Application Support/plex-preroll/config.yaml`
-    - Windows: `%APPDATA%\plex-preroll\config.yaml`
-2. Default path: `~/.config/plex-preroll/config.yaml` (if different from the platform-specific user config directory).
-
-Example `config.yaml`:
-
-```yaml
-seasons:
-  halloween:
-    from: 10-01
-    to: 11-01
-    files:
-      - /media/prerolls/halloween/spooky1.mp4
-      - /media/prerolls/halloween/spooky2.mp4
-  
-  thanksgiving:
-    from: 11-20
-    to: 11-30
-    files:
-      - /media/prerolls/thanksgiving/
-  
-  christmas:
-    from: 11-20
-    to: 01-06
-    files:
-      - /media/prerolls/christmas/santa.mp4
-      - /media/prerolls/christmas/snowman.mp4
-  
-  summer:
-    from: 06-01
-    to: 08-31
-    files:
-      - /media/prerolls/summer/
-
-default:
-  - /media/prerolls/default/movie_trivia.mp4
-  - /media/prerolls/default/coming_soon.mp4
-```
-
-### Configuration Format
-
-- **seasons**: Named time periods with:
-  - `from`: Start date in MM-DD format
-  - `to`: End date in MM-DD format
-  - `files`: List of video file paths or directories (directories will be expanded to include all video files)
-- **default**: List of video files to use when no season matches
-
-Notes:
-- Seasons can overlap (all matching seasons will be included)
-- Seasons can cross year boundaries (e.g., Christmas from Nov 20 to Jan 6)
-- All file paths must be absolute paths.
-- Directories in the `files` list will be expanded. Only files with recognized video extensions (e.g., `.mp4`, `.mkv`, `.mov`, `.avi`, `.ts`, `.webm`, etc.) will be included from these directories. Explicitly listed files are also checked against these extensions.
-- If a configured directory cannot be read (e.g., due to permissions), the application will log an error and exit.
-
-## Usage
-
-### Manual Execution
-
-```bash
-# Run and update Plex
-./bin/plex-preroll
-
-# Dry run - show what would be set without updating Plex
-./bin/plex-preroll --dry-run
-
-# Show version
-./bin/plex-preroll --version
-
-# With custom config file
-PLEX_PREROLL_CFG=/path/to/config.yaml ./bin/plex-preroll
-```
-
-### Automated Execution with Cron
-
-The intended use is to run this automatically via cron. Add to your crontab:
-
-```bash
-# Run daily at 4 AM
-0 4 * * * /path/to/plex-preroll >> /path/to/logs/plex-preroll.log 2>&1
-
-# Run every 6 hours
-0 */6 * * * /path/to/plex-preroll >> /path/to/logs/plex-preroll.log 2>&1
-```
-
-**Recommended setup**: Place your `.env` file at `~/.config/plex-preroll/.env` and the application will automatically load it, eliminating the need to set environment variables in your crontab.
-
-If you prefer to set environment variables directly in crontab:
-
-```bash
-# Crontab with environment variables
-PLEX_TOKEN=your-token-here
-PLEX_SERVER_URL=http://localhost:32400
-0 4 * * * /path/to/plex-preroll >> /path/to/logs/plex-preroll.log 2>&1
-```
-
-### Example Output
-
-When run on December 25th with the example configuration:
-```
-2023-12-25 04:00:01 Active prerolls for today:
-  - /media/prerolls/christmas/santa.mp4
-  - /media/prerolls/christmas/snowman.mp4
-2023-12-25 04:00:01 Successfully updated Plex preroll settings
-```
-
-## Development
-
-### Prerequisites
-
-- Go 1.20 or later
-- Make (optional, for using Makefile)
-
-### Building
-
-To build the main `plex-preroll` application:
-```bash
-# Build with version info
-make build
-# or simply: go build -o bin/plex-preroll ./cmd/plex-preroll
-```
-
-To build the `plex-preroll-setup` tool:
-```bash
-make build-setup
-# or simply: go build -o bin/plex-preroll-setup ./cmd/plex-preroll-setup
-```
-
-To build both:
-```bash
 make all
 ```
 
-### Running Tests
+This builds `bin/plex-preroll` and the interactive `bin/plex-preroll-setup` tool. Without Make:
 
 ```bash
-# Run all tests
-go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run specific test
-go test ./internal -run TestGetActivePrerolls
+go build -o bin/plex-preroll ./cmd/plex-preroll
+go build -o bin/plex-preroll-setup ./cmd/plex-preroll-setup
 ```
 
-### Project Structure
+On Windows, use `.exe` output names, such as `bin/plex-preroll.exe`. The shell examples below use Bash.
 
+## Set up
+
+```bash
+./bin/plex-preroll-setup
 ```
-├── cmd/
-│   ├── plex-preroll/        # Main application entry point
-│   └── plex-preroll-setup/  # Configuration setup tool entry point
-├── internal/                # Core business logic (shared)
-│   ├── config.go            # Configuration loading and preroll selection
-│   ├── config_test.go       # Configuration tests
-│   ├── files.go             # File system operations
-│   ├── files_test.go        # File system tests
-│   ├── plexclient.go        # Plex API client
-│   └── testdata/            # Test fixtures
-├── .env.example             # Example environment configuration
-├── Makefile                 # Build automation
-└── bin/                     # Compiled binaries (plex-preroll, plex-preroll-setup)
+
+The setup tool asks for your Plex server URL and token, then creates a `.env` file and a YAML configuration. It suggests locations in your user configuration directory and asks before overwriting existing files. Token input is hidden in a terminal. On Unix, the `.env` file has owner-only `0600` permissions, including when replacing an existing file. On Windows, store it in your private user directory and use Windows file permissions to control access.
+
+Get your token by following [Plex's authentication-token instructions](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/). Treat it as a password. Use an HTTPS server URL when sending it across an untrusted network.
+
+Run a dry run before updating Plex:
+
+```bash
+./bin/plex-preroll --dry-run
+./bin/plex-preroll
+```
+
+The command uses the local date and time zone of the machine running it. It must be able to inspect file metadata and list configured directories locally. Plex must be able to read the videos for playback. If Plex runs on another host or in a container, mount the videos at the same absolute paths for both programs. The command does not upload videos or translate paths.
+
+## Configure manually
+
+The application checks for `.env` in this order:
+
+1. The current working directory.
+2. The `plex-preroll` subdirectory of your operating system's user configuration directory.
+3. `~/.config/plex-preroll/.env`, if different from the second location.
+
+It loads the first file it finds. Existing environment variables take precedence over values from that file. A malformed `.env` file stops the command with an error.
+
+The usual user configuration locations are:
+
+| Platform | Configuration directory |
+| --- | --- |
+| Linux | `$XDG_CONFIG_HOME/plex-preroll`, or `~/.config/plex-preroll` |
+| macOS | `~/Library/Application Support/plex-preroll` |
+| Windows | `%APPDATA%\plex-preroll` |
+
+Copy [.env.example](.env.example) to `.env` in one of those locations and replace the token placeholder:
+
+```dotenv
+PLEX_SERVER_URL=http://localhost:32400
+PLEX_TOKEN=your-plex-token-here
+# Optional override for the YAML file:
+# PLEX_PREROLL_CFG=/absolute/path/to/config.yaml
+```
+
+On Unix, restrict a manually created credential file with `chmod 600 /path/to/.env`. Keep real tokens and local configuration out of version control.
+
+`PLEX_TOKEN` is required, including for dry runs. `PLEX_SERVER_URL` defaults to `http://localhost:32400`.
+
+Set `PLEX_PREROLL_CFG` to select a YAML file. A leading `~/` in this value expands to your home directory. Otherwise, the command searches for `config.yaml` in your user configuration directory, then `~/.config/plex-preroll/config.yaml`. It does not search the current directory for YAML unless you set `PLEX_PREROLL_CFG`.
+
+### Seasons and videos
+
+Use [config/prerolls.yaml](config/prerolls.yaml) as a starting point. Replace the sample paths with your own:
+
+```yaml
+seasons:
+  - name: halloween
+    from: "10-01"
+    to: "10-31"
+    files:
+      - /media/prerolls/halloween/
+
+  - name: thanksgiving
+    from: "11-20"
+    to: "11-30"
+    files:
+      - /media/prerolls/thanksgiving/turkeys.mp4
+
+  - name: christmas
+    from: "11-20"
+    to: "01-06"
+    files:
+      - /media/prerolls/christmas/santa.mp4
+      - /media/prerolls/christmas/snowman.mp4
+
+default:
+  - /media/prerolls/default/intro.mp4
+```
+
+`seasons` is a list. Each entry has a `name`, a `from` date, a `to` date, and a `files` list. The setup tool writes this same format. Unknown fields, extra YAML documents, and missing season file lists are rejected. Use an explicit empty list when you intend to clear prerolls.
+
+- Dates use `MM-DD`. Single-digit months and days are also accepted. Dates must be valid calendar dates; February 29 is allowed.
+- Both endpoints are inclusive. A season from `"12-25"` to `"12-25"` applies only on December 25.
+- A start date after the end date crosses New Year, such as November 20 through January 6.
+- Overlapping seasons combine their videos. The default list is used only when no season matches.
+- Video paths must be absolute. Use forward slashes or single-quoted paths in Windows YAML, such as `'C:\Media\Prerolls\intro.mp4'`.
+- Directories include video files directly inside them. The command does not recurse into subdirectories.
+- Supported extensions are `.mp4`, `.mkv`, `.avi`, `.mov`, `.wmv`, `.ts`, `.m2ts`, `.flv`, `.asf`, `.3gp`, and `.webm`, case-insensitively.
+- Commas and semicolons are not allowed in video paths because Plex treats them as separators.
+- The final list is sorted and deduplicated.
+
+A configured path that cannot be inspected, an unreadable directory, an unsupported explicit file, or a directory with no usable videos stops the update. Existing Plex settings remain unchanged. This also prevents a missing media mount from clearing your prerolls.
+
+An empty selected list explicitly clears Plex's preroll setting. For example, `default: []` clears it on dates when no season matches. A matching season with `files: []` contributes no videos and does not trigger the default list.
+
+## Run on a schedule
+
+The command runs once and exits. On Linux or macOS, place `.env` and `config.yaml` in your user configuration directory, then add a cron entry with the full binary path:
+
+```cron
+# Update daily at 4 AM. Create the log directory first.
+0 4 * * * /absolute/path/to/bin/plex-preroll >> /absolute/path/to/logs/plex-preroll.log 2>&1
+```
+
+Run the job as the user who owns the configuration and can inspect media paths and list configured directories. Windows users can schedule `plex-preroll.exe` with Task Scheduler under that user account.
+
+Other commands:
+
+```bash
+./bin/plex-preroll --version
+PLEX_PREROLL_CFG=/absolute/path/to/config.yaml ./bin/plex-preroll --dry-run
 ```
 
 ## Troubleshooting
 
-### Common Issues
+If the token is missing, check the `.env` search locations and the environment of the user running the command.
 
-1. **"PLEX_TOKEN environment variable is not set"**
-   - Create a `.env` file with your Plex token or set the environment variable
+If loading YAML fails, check that `seasons` is a list with `- name:` entries, and that dates are valid. Quote dates as shown above.
 
-2. **"Failed to update Plex preroll settings"**
-   - Verify your Plex server URL is correct
-   - Ensure your Plex token has the necessary permissions
-   - Check that Plex server is running and accessible
+If file validation fails, check the selected paths, permissions, and media mounts. Run `--dry-run` as the same user as your scheduled job. A directory containing only subdirectories or unsupported files is not a valid video source.
 
-3. **"No video files found in directory" or "Specified file ... is not a recognized video file"**
-   - Ensure the directory exists and contains files with common video extensions (e.g., `.mp4`, `.mkv`).
-   - Check that explicitly listed files also have recognized video extensions.
-   - Verify file and directory permissions.
+If updating Plex fails, check the server URL, token, and network connection. Requests have a 30-second timeout and do not follow redirects. When using a proxy, configure the final server URL directly.
 
-4. **"Failed to read configured directory..."**
-   - This indicates a permission issue or other problem accessing a directory listed in your `config.yaml`. Ensure the application has rights to list files in that directory.
+If Plex accepts the update but does not play a preroll, check that Plex can read those exact file paths. Enable Cinema Trailers in the Plex app and the library's advanced settings. Client support varies; see [Plex's playback requirements](https://support.plex.tv/articles/202920803-extras/).
 
-5. **Prerolls not showing in Plex**
-   - Verify the video files are accessible to the Plex server
-   - Check Plex server logs for any errors
-   - Ensure preroll feature is enabled in Plex settings
+## Development
+
+```bash
+make all
+go test -race -cover ./...
+go vet ./...
+```
+
+CI tests both commands and the shared packages on Linux, macOS, and Windows. Linux also tests the minimum supported Go version. A separate job checks for reachable known vulnerabilities with `govulncheck` on current stable Go.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for change and test guidance, and [SECURITY.md](SECURITY.md) to report vulnerabilities privately.
 
 ## License
 
-[Add your license here]
-
-## Contributing
-
-[Add contribution guidelines if applicable]
+[MIT](LICENSE), copyright Brian McCain.
