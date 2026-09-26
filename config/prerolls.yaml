@@ -1,27 +1,24 @@
+# Use media visible at the same paths to this command and Plex.
+# Plex needs read access to play the videos.
 seasons:
+  - name: halloween
+    from: "10-01"
+    to: "10-31"
+    files:
+      - /media/prerolls/halloween/
+
   - name: thanksgiving
-    from: "11-01"
+    from: "11-20"
     to: "11-30"
     files:
-      - /theater/Media/Preroll/seasonal/thanksgiving/turkeys.mp4
-      - /theater/Media/Preroll/seasonal/thanksgiving/mashed_potatoes.mp4
+      - /media/prerolls/thanksgiving/turkeys.mp4
 
   - name: christmas
     from: "11-20"
     to: "01-06"
     files:
-      - /theater/Media/Preroll/seasonal/christmas/jingle_bells.mp4
-      - /theater/Media/Preroll/seasonal/christmas/santa_hat.mp4
-
-  - name: summer
-    from: "06-01"
-    to: "08-31"
-    files:
-      - /theater/Media/Preroll/general/1.mp4
-      - /theater/Media/Preroll/general/6.mp4
-      - /theater/Media/Preroll/general/4.mp4
+      - /media/prerolls/christmas/santa.mp4
+      - /media/prerolls/christmas/snowman.mp4
 
 default:
-  - /theater/Media/Preroll/default/generic_intro.mp4
-  - /theater/Media/Preroll/default/plex_logo_spin.mp4
-
+  - /media/prerolls/default/intro.mp4
