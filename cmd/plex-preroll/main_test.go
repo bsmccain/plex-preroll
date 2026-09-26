@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,13 @@ import (
 	"github.com/bsmccain/plex-preroll/internal"
 	"gopkg.in/yaml.v3"
 )
+
+const dotenvTestSecret = "dummy-plex-token-parser-redaction-43976"
+
+var malformedDotenvInputs = map[string]string{
+	"invalid key":        "PLEX-TOKEN=" + dotenvTestSecret + "\n",
+	"unterminated quote": "PLEX_TOKEN=\"" + dotenvTestSecret + "\n",
+}
 
 func isolate(t *testing.T) string {
 	t.Helper()
@@ -171,6 +179,43 @@ func TestRunDefaultConfigSearch(t *testing.T) {
 	}
 }
 
+func TestRunRedactsMalformedDotenv(t *testing.T) {
+	for name, content := range malformedDotenvInputs {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			if err := os.WriteFile(".env", []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			err := run(nil, &stdout, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "load .env file .env: invalid dotenv syntax") {
+				t.Fatalf("error = %v, want redacted dotenv syntax error", err)
+			}
+			if errors.Unwrap(err) != nil {
+				t.Fatal("redacted syntax error must not wrap the original parser error")
+			}
+			for _, output := range []string{err.Error(), stdout.String(), stderr.String()} {
+				if strings.Contains(output, dotenvTestSecret) {
+					t.Fatal("dotenv syntax error disclosed the token")
+				}
+			}
+		})
+	}
+}
+
+func TestRunPreservesDotenvFilesystemErrors(t *testing.T) {
+	isolate(t)
+	if err := os.Mkdir(".env", 0700); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := run(nil, &output, &output)
+	var pathError *os.PathError
+	if !errors.As(err, &pathError) || pathError.Path != ".env" {
+		t.Fatalf("expected .env filesystem error, got %v", err)
+	}
+}
+
 func TestRunValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -246,6 +291,32 @@ func TestCommandSubprocess(t *testing.T) {
 			}
 			if !strings.Contains(string(output), tc.want) {
 				t.Fatalf("output %q missing %q", output, tc.want)
+			}
+		})
+	}
+	for name, content := range malformedDotenvInputs {
+		t.Run("redacts dotenv "+name, func(t *testing.T) {
+			if err := os.WriteFile(".env", []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Remove(".env") })
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, binary)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			if ctx.Err() != nil {
+				t.Fatal(ctx.Err())
+			}
+			if err == nil {
+				t.Fatal("malformed dotenv must exit nonzero")
+			}
+			if !strings.Contains(stderr.String(), "load .env file .env: invalid dotenv syntax") {
+				t.Fatalf("stderr missing redacted dotenv error: %s", &stderr)
+			}
+			if strings.Contains(stdout.String(), dotenvTestSecret) || strings.Contains(stderr.String(), dotenvTestSecret) {
+				t.Fatal("command output disclosed the token")
 			}
 		})
 	}

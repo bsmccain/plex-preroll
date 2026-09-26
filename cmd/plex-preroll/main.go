@@ -63,7 +63,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("inspect .env file %s: %w", path, err)
 		}
 		if err := godotenv.Load(path); err != nil {
-			return fmt.Errorf("load .env file %s: %w", path, err)
+			var pathError *os.PathError
+			if errors.As(err, &pathError) {
+				return fmt.Errorf("load .env file %s: %w", path, pathError)
+			}
+			// Parser errors can include whole lines containing the Plex token.
+			// Do not expose or wrap their contents in the returned error.
+			return fmt.Errorf("load .env file %s: invalid dotenv syntax", path)
 		}
 		logger.Printf("Loaded .env from %s", path)
 		loadedEnv = true
