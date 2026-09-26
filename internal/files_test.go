@@ -28,7 +28,7 @@ func TestBuildPrerollFileList(t *testing.T) {
 	for _, name := range []string{
 		"video.mp4", "video.mkv", "video.avi", "video.mov", "video.wmv",
 		"video.ts", "video.m2ts", "video.flv", "video.asf", "video.3gp", "video.webm",
-		"video.MP4", "video with spaces.mp4", "видео.mp4", "video&special.mp4",
+		"uppercase.MP4", "video with spaces.mp4", "видео.mp4", "video&special.mp4",
 	} {
 		path := filepath.Join(videos, name)
 		writeTestVideo(t, path)
