@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -140,30 +141,59 @@ func TestBuildPrerollFileListErrorsDiscardAllFiles(t *testing.T) {
 	}
 }
 
-func TestBuildPrerollFileListUnreadablePaths(t *testing.T) {
-	for _, directory := range []bool{false, true} {
-		name := "file"
-		if directory {
-			name = "directory"
+func TestBuildPrerollFileListDoesNotRequireVideoReadPermission(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "video.mp4")
+	writeTestVideo(t, video)
+	if err := os.Chmod(video, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(video, 0600); err != nil {
+			t.Error(err)
 		}
+	})
+	if _, err := os.Stat(video); err != nil {
+		t.Fatalf("test requires visible file metadata: %v", err)
+	}
+	if file, err := os.Open(video); err == nil {
+		file.Close()
+		t.Skip("filesystem or current user does not enforce video read permission")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected video read permission denial, got %v", err)
+	}
+
+	// Plex reads the contents under its own account; the scheduler only sends
+	// the file path, whether configured explicitly or found in a directory.
+	for name, path := range map[string]string{"explicit file": video, "directory": dir} {
 		t.Run(name, func(t *testing.T) {
-			path := t.TempDir()
-			if !directory {
-				path = filepath.Join(path, "video.mp4")
-				writeTestVideo(t, path)
-			}
-			if err := os.Chmod(path, 0000); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { os.Chmod(path, 0755) })
-			if f, err := os.Open(path); err == nil {
-				f.Close()
-				t.Skip("current user can open paths with no permission bits")
-			}
-			if got, err := BuildPrerollFileList([]string{path}); err == nil || got != nil {
-				t.Fatalf("unreadable path returned %v, %v; want no files and an error", got, err)
+			got, err := BuildPrerollFileList([]string{path})
+			if err != nil || !reflect.DeepEqual(got, []string{video}) {
+				t.Fatalf("visible video returned %v, %v; want %q and no error", got, err, video)
 			}
 		})
+	}
+}
+
+func TestBuildPrerollFileListRejectsUnreadableDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTestVideo(t, filepath.Join(dir, "video.mp4"))
+	if err := os.Chmod(dir, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0700); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := os.ReadDir(dir); err == nil {
+		t.Skip("filesystem or current user does not enforce directory read permission")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected directory read permission denial, got %v", err)
+	}
+	got, err := BuildPrerollFileList([]string{dir})
+	if !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), "cannot read configured directory") || got != nil {
+		t.Fatalf("unreadable directory returned %v, %v; want no files and a directory read error", got, err)
 	}
 }
 

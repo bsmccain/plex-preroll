@@ -91,12 +91,7 @@ func validateVideoFile(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("video path %q is not a regular file", path)
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("cannot read video file %q: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("cannot close video file %q: %w", path, err)
-	}
+	// Plex opens the video under its own account; this process only needs to
+	// resolve its path and confirm that it is a regular file.
 	return nil
 }
