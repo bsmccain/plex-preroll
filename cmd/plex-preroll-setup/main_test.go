@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -157,6 +158,88 @@ func TestSetupOverwrite(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+func assertNoSetupTemps(t *testing.T, dir string) {
+	t.Helper()
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), ".plex-preroll-") {
+			t.Errorf("setup left a temporary file at %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetupPreservesConfigWhenEnvCannotBeStaged(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("original config"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A regular file cannot hold the adjacent temporary .env. This filesystem
+	// failure is deterministic even when tests run with elevated privileges.
+	blockedParent := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blockedParent, []byte("original blocker"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(blockedParent, ".env")
+	err := saveSetupFiles(configPath, []byte("replacement config"), envPath, []byte("PLEX_TOKEN=secret"))
+	if err == nil || !strings.Contains(err.Error(), "preparing .env") {
+		t.Fatalf("error = %v, want .env staging failure", err)
+	}
+	config, err := os.ReadFile(configPath)
+	if err != nil || string(config) != "original config" {
+		t.Errorf("existing config changed after failed setup: %q, %v", config, err)
+	}
+	assertMode(t, configPath, 0600)
+	assertNoSetupTemps(t, dir)
+}
+
+func TestSetupRollsBackConfigWhenEnvCannotBeReplaced(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing config=%t", existing), func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.yaml")
+			if existing {
+				if err := os.WriteFile(configPath, []byte("original config"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Both temporary outputs can be written, but the .env rename fails.
+			envPath := filepath.Join(dir, ".env")
+			if err := os.Mkdir(envPath, 0700); err != nil {
+				t.Fatal(err)
+			}
+			markerPath := filepath.Join(envPath, "keep")
+			if err := os.WriteFile(markerPath, []byte("untouched"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := saveSetupFiles(configPath, []byte("replacement config"), envPath, []byte("PLEX_TOKEN=secret"))
+			if err == nil || !strings.Contains(err.Error(), "writing .env") {
+				t.Fatalf("error = %v, want .env replacement failure", err)
+			}
+			if existing {
+				config, err := os.ReadFile(configPath)
+				if err != nil || string(config) != "original config" {
+					t.Errorf("failed setup did not restore original config: %q, %v", config, err)
+				}
+				assertMode(t, configPath, 0600)
+			} else if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+				t.Errorf("failed setup left a new config: %v", err)
+			}
+			marker, err := os.ReadFile(markerPath)
+			if err != nil || string(marker) != "untouched" {
+				t.Errorf("failed setup changed .env target: %q, %v", marker, err)
+			}
+			assertNoSetupTemps(t, dir)
 		})
 	}
 }

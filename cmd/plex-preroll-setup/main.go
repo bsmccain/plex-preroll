@@ -169,29 +169,93 @@ func (p *prompts) confirmOverwrite(path string) error {
 	return nil
 }
 
-// writeFile replaces a file with a fully written temporary file. For credentials,
-// the temporary file and the final file both have owner-only permissions.
-func writeFile(path string, data []byte, mode os.FileMode) error {
+// stageFile writes an adjacent temporary file without changing the destination.
+// Credential files receive owner-only permissions before any data is written.
+func stageFile(path string, data []byte, mode os.FileMode) (staged string, err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+		return "", err
 	}
 	file, err := os.CreateTemp(filepath.Dir(path), ".plex-preroll-*")
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer os.Remove(file.Name())
+	defer func() {
+		if err != nil {
+			os.Remove(file.Name())
+		}
+	}()
 	if err := file.Chmod(mode); err != nil {
 		file.Close()
-		return err
+		return "", err
 	}
 	if _, err := file.Write(data); err != nil {
 		file.Close()
-		return err
+		return "", err
 	}
 	if err := file.Close(); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(file.Name(), path)
+	return file.Name(), nil
+}
+
+func saveSetupFiles(configPath string, yamlData []byte, envPath string, envData []byte) error {
+	configStaged, err := stageFile(configPath, yamlData, 0644)
+	if err != nil {
+		return fmt.Errorf("preparing config.yaml: %w", err)
+	}
+	defer os.Remove(configStaged)
+	envStaged, err := stageFile(envPath, envData, 0600)
+	if err != nil {
+		return fmt.Errorf("preparing .env: %w", err)
+	}
+	defer os.Remove(envStaged)
+
+	// Keep a replacement ready for rollback before changing either destination.
+	backup := ""
+	keepBackup := false
+	defer func() {
+		if backup != "" && !keepBackup {
+			os.Remove(backup)
+		}
+	}()
+	info, err := os.Stat(configPath)
+	if err == nil {
+		original, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("backing up config.yaml: %w", err)
+		}
+		backup, err = stageFile(configPath, original, info.Mode().Perm())
+		if err != nil {
+			return fmt.Errorf("backing up config.yaml: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking config.yaml: %w", err)
+	}
+	rollback := func(cause error) error {
+		if backup != "" {
+			if err := os.Rename(backup, configPath); err != nil {
+				keepBackup = true
+				return errors.Join(cause, fmt.Errorf("restoring config.yaml failed; original remains at %s: %w", backup, err))
+			}
+		} else if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
+			return errors.Join(cause, fmt.Errorf("removing incomplete config.yaml: %w", err))
+		}
+		return cause
+	}
+	if err := os.Rename(configStaged, configPath); err != nil {
+		return fmt.Errorf("writing config.yaml: %w", err)
+	}
+	// The filesystem may equate names that differ in Unicode normalization or
+	// another way beyond case alone. Never replace config.yaml with credentials.
+	configInfo, configErr := os.Stat(configPath)
+	envInfo, envErr := os.Stat(envPath)
+	if configErr == nil && envErr == nil && os.SameFile(configInfo, envInfo) {
+		return rollback(fmt.Errorf(".env resolves to config.yaml; choose different paths"))
+	}
+	if err := os.Rename(envStaged, envPath); err != nil {
+		return rollback(fmt.Errorf("writing .env: %w", err))
+	}
+	return nil
 }
 
 func run(input io.Reader, output io.Writer) error {
@@ -304,18 +368,8 @@ func run(input io.Reader, output io.Writer) error {
 			return err
 		}
 	}
-	if err := writeFile(configPath, yamlData, 0644); err != nil {
-		return fmt.Errorf("writing config.yaml: %w", err)
-	}
-	// Recheck after creating config.yaml: the filesystem may equate names that
-	// differ in Unicode normalization or another way beyond case alone.
-	configInfo, configErr = os.Stat(configPath)
-	envInfo, envErr = os.Stat(envPath)
-	if configErr == nil && envErr == nil && os.SameFile(configInfo, envInfo) {
-		return fmt.Errorf("config.yaml was saved, but .env resolves to the same file; choose different paths")
-	}
-	if err := writeFile(envPath, []byte(envData+"\n"), 0600); err != nil {
-		return fmt.Errorf("writing .env: %w", err)
+	if err := saveSetupFiles(configPath, yamlData, envPath, []byte(envData+"\n")); err != nil {
+		return err
 	}
 	fmt.Fprintf(output, "config.yaml saved at %s\n.env saved at %s\n\nSetup complete!\n", configPath, envPath)
 	return nil
