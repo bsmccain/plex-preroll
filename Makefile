@@ -1,31 +1,24 @@
-VERSION := $(shell git describe --tags --always --dirty)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-# Find all .go files in the project, excluding vendor directories.
-GOFILES := $(shell find . -type f -name '*.go' -not -path "./vendor/*")
-# Specifically find .go files for the setup tool
-GOFILES_SETUP := $(shell find ./cmd/plex-preroll-setup -type f -name '*.go') $(shell find ./internal -type f -name '*.go' -not -path "./vendor/*")
-
+GOFILES_MAIN := $(shell find ./cmd/plex-preroll ./internal -type f -name '*.go')
+GOFILES_SETUP := $(shell find ./cmd/plex-preroll-setup ./internal -type f -name '*.go')
+BUILD_DEPS := go.mod go.sum Makefile
 
 .PHONY: all build build-setup clean
 
 all: build build-setup
 
 build: bin/plex-preroll
-	@echo "plex-preroll binary is up to date."
 
 build-setup: bin/plex-preroll-setup
-	@echo "plex-preroll-setup binary is up to date."
 
-bin/plex-preroll: $(filter-out $(GOFILES_SETUP),$(GOFILES))
-	@echo "Building plex-preroll..."
+bin/plex-preroll: $(GOFILES_MAIN) $(BUILD_DEPS)
 	@mkdir -p bin
-	@go build -ldflags "-X main.version=$(VERSION)" -o $@ ./cmd/plex-preroll
+	go build -ldflags "-X main.version=$(VERSION)" -o $@ ./cmd/plex-preroll
 
-bin/plex-preroll-setup: $(GOFILES_SETUP)
-	@echo "Building plex-preroll-setup..."
+bin/plex-preroll-setup: $(GOFILES_SETUP) $(BUILD_DEPS)
 	@mkdir -p bin
-	@go build -o $@ ./cmd/plex-preroll-setup
+	go build -o $@ ./cmd/plex-preroll-setup
 
 clean:
-	@echo "Cleaning..."
-	@rm -f bin/plex-preroll bin/plex-preroll-setup
+	rm -f bin/plex-preroll bin/plex-preroll-setup
