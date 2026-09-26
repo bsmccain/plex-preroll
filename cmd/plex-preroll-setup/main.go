@@ -103,7 +103,22 @@ func (p *prompts) savePath(prompt, defaultPath string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return resolveParent(absolute)
+		path, err := resolveParent(absolute)
+		if err != nil {
+			return "", err
+		}
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.Mode().IsRegular() {
+			fmt.Fprintf(p.output, "%s is not a regular file. Enter a different path.\n", path)
+			continue
+		}
+		return path, nil
 	}
 }
 

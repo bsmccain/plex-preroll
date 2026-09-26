@@ -83,6 +83,53 @@ func TestSetupRoundTrip(t *testing.T) {
 	assertMode(t, envPath, 0600)
 }
 
+func TestSetupRepromptsForNonRegularOutputPaths(t *testing.T) {
+	for _, kind := range []string{"directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			invalidPath := filepath.Join(dir, "invalid")
+			var err error
+			if kind == "directory" {
+				err = os.Mkdir(invalidPath, 0700)
+			} else {
+				err = os.Symlink(filepath.Join(dir, "missing-target"), invalidPath)
+			}
+			if err != nil {
+				if runtime.GOOS == "windows" && kind == "symlink" {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(dir, "config.yaml")
+			envPath := filepath.Join(dir, ".env")
+			video := filepath.Join(dir, "holiday.mp4")
+			input := strings.Join([]string{
+				"test-token", "", invalidPath, configPath, invalidPath, envPath,
+				"y", "holiday", "12-25", "12-25", video, "", "n", "",
+			}, "\n") + "\n"
+			var output bytes.Buffer
+			if err := run(strings.NewReader(input), &output); err != nil {
+				t.Fatalf("setup did not recover from invalid output paths: %v", err)
+			}
+			config, err := internal.LoadConfig(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Seasons) != 1 || config.Seasons[0].Name != "holiday" || !reflect.DeepEqual(config.Seasons[0].Files, []string{video}) {
+				t.Errorf("setup lost season input after correcting output paths: %#v", config.Seasons)
+			}
+			warning := "is not a regular file. Enter a different path."
+			transcript := output.String()
+			if strings.Count(transcript, warning) != 2 || strings.LastIndex(transcript, warning) > strings.Index(transcript, "Add a season?") {
+				t.Errorf("setup must correct both paths before collecting seasons: %s", transcript)
+			}
+			if _, err := godotenv.Read(envPath); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestSetupEOFLeavesNoFiles(t *testing.T) {
 	for _, stop := range []string{"token", "server", "paths", "season date", "default", "confirmation"} {
 		t.Run(stop, func(t *testing.T) {
