@@ -162,6 +162,10 @@ CI tests both commands and the shared packages on Linux, macOS, and Windows. Lin
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change and test guidance, and [SECURITY.md](SECURITY.md) to report vulnerabilities privately.
 
+## Credits
+
+Inspired by [Plex-Automatic-Preroll](https://github.com/Nacer27/Plex-Automatic-Preroll), a Python script that rotates Plex prerolls by month. plex-preroll is an independent Go implementation and shares no code with it.
+
 ## License
 
 [MIT](LICENSE), copyright Brian McCain.
